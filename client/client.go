@@ -16,6 +16,7 @@ type Message struct {
 	Content string
 }
 
+// decodes messages and print out the content
 func rec(c net.Conn, exit chan int) {
 	for {
 		// create a temp buffer
@@ -67,6 +68,8 @@ func send(c net.Conn, exit chan int, username string, freshInput chan int) {
 		fmt.Println("TCP client exiting...")
 		exit <- 1
 		return
+	}else if len(input) != 3 || strings.ToLower(input[0]) == "send" {
+		fmt.Println("Please input correct format send [recipient] [message]")
 	}
 	freshInput <- 1
 }
@@ -86,7 +89,7 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-
+	
 	fmt.Fprintf(c, username+"\n")
 
 	exit := make(chan int, 1)

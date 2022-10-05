@@ -26,11 +26,15 @@ type connections struct {
 func New() (*connections, error) {
 	d := &connections{}
 	// Create new map
+	// key -> string
+	// value -> connection
 	d.connectionMap = make(map[string]net.Conn)
 
 	return d, nil
 }
 
+//Add user to the connection map 
+// key -> 
 func (d *connections) Add(user string, c net.Conn) error {
 
 	d.mu.Lock()
@@ -54,6 +58,7 @@ func handleConnection(c net.Conn, kill chan int, d *connections) {
 
 	//add initial message deciphering to get username
 	netData, err := bufio.NewReader(c).ReadString('\n')
+	fmt.Println(netData)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -61,6 +66,9 @@ func handleConnection(c net.Conn, kill chan int, d *connections) {
 
 	temp := strings.TrimSpace(string(netData))
 	//fmt.Println(temp)
+	// add connection to map
+	// key -> username
+	// value -> connection
 	d.Add(temp, c)
 
 	//we will see if this works
@@ -91,6 +99,7 @@ func handleConnection(c net.Conn, kill chan int, d *connections) {
 
 			// convert bytes into Buffer (which implements io.Reader/io.Writer)
 			tmpbuff := bytes.NewBuffer(tmp)
+			// make a new Message
 			tmpstruct := new(Message)
 
 			// creates a decoder object
@@ -166,6 +175,7 @@ func main() {
 		go func(l net.Listener) {
 			for {
 				c, err := l.Accept()
+				fmt.Println("Connecting...")
 				if err != nil {
 					// handle error (and then for example indicate acceptor is down)
 					newConn <- nil
