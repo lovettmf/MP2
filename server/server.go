@@ -26,20 +26,24 @@ type connections struct {
 func New() (*connections, error) {
 	d := &connections{}
 	// Create new map
-	// key -> string
-	// value -> connection
 	d.connectionMap = make(map[string]net.Conn)
 
 	return d, nil
 }
 
-//Add user to the connection map 
-// key -> 
 func (d *connections) Add(user string, c net.Conn) error {
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.connectionMap[user] = c
+	return nil
+}
+
+func (d *connections) Delete(user string) error {
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.connectionMap, user)
 	return nil
 }
 
@@ -53,78 +57,81 @@ func (d *connections) Lookup(user string) (net.Conn, string) {
 	return nil, "not found"
 }
 
-func handleConnection(c net.Conn, kill chan int, d *connections) {
+func handleConnection(c net.Conn, d *connections) {
 	//https://gist.github.com/MilosSimic/ae7fe8d70866e89dbd6e84d86dc8d8d5
 
 	//add initial message deciphering to get username
-	netData, err := bufio.NewReader(c).ReadString('\n')
-	fmt.Println(netData)
+	tmp := make([]byte, 500)
+
+	_, err := c.Read(tmp)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	temp := strings.TrimSpace(string(netData))
-	//fmt.Println(temp)
-	// add connection to map
-	// key -> username
-	// value -> connection
-	d.Add(temp, c)
+	// convert bytes into Buffer (which implements io.Reader/io.Writer)
+	tmpbuff := bytes.NewBuffer(tmp)
+	tmpstruct := new(Message)
 
-	//we will see if this works
+	// creates a decoder object
+	gobobj := gob.NewDecoder(tmpbuff)
+	// decodes buffer and unmarshals it into a Message struct
+	gobobj.Decode(tmpstruct)
 
-	tmp := make([]byte, 500)
+	//Add the connection to the dictionary
+	d.Add(tmpstruct.From, c)
+
 	for {
-		select {
-		case <-kill:
+		_, err = c.Read(tmp)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
 
-			exitMessage := Message{To: "client", From: "server", Content: "exit"}
+		// convert bytes into Buffer (which implements io.Reader/io.Writer)
+		tmpbuff = bytes.NewBuffer(tmp)
+		tmpstruct = new(Message)
+
+		// creates a decoder object
+		gobobj = gob.NewDecoder(tmpbuff)
+		// decodes buffer and unmarshals it into a Message struct
+		gobobj.Decode(tmpstruct)
+
+		//Lookup the connection object of the destination client
+		dest, status := d.Lookup(tmpstruct.To)
+
+		if status == "not found" {
+			//send error message back to original client
+			//this needs to be filled in and client needs it as well
+			notFound := Message{To: tmpstruct.From, From: "Server", Content: tmpstruct.To + " not found\n"}
 			bin_buf := new(bytes.Buffer)
 
 			// create a encoder object
 			gobobje := gob.NewEncoder(bin_buf)
 			// encode buffer and marshal it into a gob object
-			gobobje.Encode(exitMessage)
+			gobobje.Encode(notFound)
 
 			c.Write(bin_buf.Bytes())
+			continue
+		}
+		//remove the client from the map if it is exiting
+		if tmpstruct.Content == "exiting" {
+			d.Delete(tmpstruct.From)
+			c.Close()
+			return
+		} else {
+			//send to intended recipient
+			bin_buf := new(bytes.Buffer)
 
-			break
+			// create a encoder object
+			gobobje := gob.NewEncoder(bin_buf)
+			// encode buffer and marshal it into a gob object
+			gobobje.Encode(tmpstruct)
 
-		default:
-			_, err := c.Read(tmp)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
-
-			// convert bytes into Buffer (which implements io.Reader/io.Writer)
-			tmpbuff := bytes.NewBuffer(tmp)
-			// make a new Message
-			tmpstruct := new(Message)
-
-			// creates a decoder object
-			gobobjdec := gob.NewDecoder(tmpbuff)
-			// decodes buffer and unmarshals it into a Message struct
-			gobobjdec.Decode(tmpstruct)
-
-			dest, status := d.Lookup(tmpstruct.To)
-
-			if status == "not found" {
-				//send error message back to original client
-				return
-			} else {
-				//send to intended recipient
-				bin_buf := new(bytes.Buffer)
-
-				// create a encoder object
-				gobobje := gob.NewEncoder(bin_buf)
-				// encode buffer and marshal it into a gob object
-				gobobje.Encode(tmpstruct)
-
-				dest.Write(bin_buf.Bytes())
-			}
+			dest.Write(bin_buf.Bytes())
 		}
 	}
+
 	c.Close()
 }
 
@@ -146,12 +153,14 @@ func handleExit(exit chan int) {
 func main() {
 
 	//from linode
+	//Perhaps check for valid port number
 	arguments := os.Args
 	if len(arguments) == 1 {
 		fmt.Println("Please provide a port number!")
 		return
 	}
 
+	//Start listening on given port
 	PORT := ":" + arguments[1]
 	l, err := net.Listen("tcp", PORT)
 	if err != nil {
@@ -163,19 +172,16 @@ func main() {
 	//https://stackoverflow.com/questions/29948497/tcp-accept-and-go-concurrency-model
 
 	exit := make(chan int, 1)
-	kill := make(chan int, 1)
 	newConn := make(chan net.Conn, 1)
 	go handleExit(exit)
 
-	d, err := New()
+	d, err := New() //new pointer to map, will hold username/connections
 
-	count := 0
 	for {
 
 		go func(l net.Listener) {
 			for {
 				c, err := l.Accept()
-				fmt.Println("Connecting...")
 				if err != nil {
 					// handle error (and then for example indicate acceptor is down)
 					newConn <- nil
@@ -187,19 +193,29 @@ func main() {
 
 		select {
 		case <-exit:
-			if count == 0 {
-				return
+			//Needs to tell all clients to exit via a message. The main client should listen for this then, then return which kills all routines
+			//send error message back to original client
+			//this needs to be filled in and client needs it as well
+			exitMessage := Message{From: "Server", Content: "exit"}
+			d.mu.Lock()
+			for user, connection := range d.connectionMap {
+				exitMessage.To = user
+
+				bin_buf := new(bytes.Buffer)
+
+				// create a encoder object
+				gobobje := gob.NewEncoder(bin_buf)
+				// encode buffer and marshal it into a gob object
+				gobobje.Encode(exitMessage)
+
+				connection.Write(bin_buf.Bytes())
 			}
-			//Send kill signal for every connection handler to pass to client
-			for i := 0; i < count; i++ {
-				kill <- 1
-			}
-			//Kill server
+			d.mu.Unlock()
 			return
 
 		case c := <-newConn:
-			go handleConnection(c, kill, d)
-			count++
+			go handleConnection(c, d) //this needs to receive the message and update the map
+
 		}
 	}
 }
