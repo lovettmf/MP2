@@ -75,7 +75,7 @@ func handleConnection(c net.Conn, d *connections) {
 
 	// creates a decoder object
 	gobobj := gob.NewDecoder(tmpbuff)
-	// decodes buffer and unmarshals it into a Message struct
+	// decodes buffer and unmarshalls it into a Message struct
 	gobobj.Decode(tmpstruct)
 
 	//Add the connection to the dictionary

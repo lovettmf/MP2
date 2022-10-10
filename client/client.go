@@ -48,7 +48,7 @@ func send(c net.Conn, exit chan int, username string, freshInput chan int) {
 	input := strings.Split(text, " ")
 
 	if strings.ToLower(input[0]) == "send" {
-
+		
 		to := input[1]                          //username of recipient
 		content := strings.Join(input[2:], " ") //message content
 
@@ -60,13 +60,15 @@ func send(c net.Conn, exit chan int, username string, freshInput chan int) {
 		gobobj := gob.NewEncoder(bin_buf)
 		// encode buffer and marshal it into a gob object
 		gobobj.Encode(message)
-
+		// pass encoded message into channel
 		c.Write(bin_buf.Bytes())
 
 	} else if strings.ToLower(strings.TrimSpace(input[0])) == "exit" { //Check for exit command
 		exit <- 1
 		return
 	}
+
+	// update freshInput to 1 to continue receiving user input
 	freshInput <- 1
 }
 
