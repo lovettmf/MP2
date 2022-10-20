@@ -197,7 +197,7 @@ func handleExit(exit chan int) {
 
 func main() {
 
-	//Some of the following code used to establish TCP connections is derived from:
+	//Some of the following code used to establish TCP connections was coped from our MP1 which was derived from:
 	//https://www.linode.com/docs/guides/developing-udp-and-tcp-clients-and-servers-in-go/
 
 	//Reads the command line argument for a port number to listen on
